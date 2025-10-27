@@ -206,6 +206,7 @@ class WorkOrderExecution(models.Model):
 
         operation_vals = []
         sequence = 10
+
         for workorder in execution_line.production_id.workorder_ids.sorted(lambda w: w.id):
             # Get operation name
             op_name = workorder.name
@@ -214,16 +215,28 @@ class WorkOrderExecution(models.Model):
             if not op_name:
                 op_name = 'Operation %s' % workorder.id
 
-            operation_vals.append({
+            # Prepare values with ALL parent fields set explicitly
+            vals = {
                 'execution_line_id': execution_line.id,
+                'execution_id': execution_line.execution_id.id,
+                'project_id': execution_line.execution_id.project_id.id if execution_line.execution_id.project_id else False,
+                'product_id': execution_line.execution_id.product_id.id if execution_line.execution_id.product_id else False,
+                'component_id': execution_line.component_id.id if execution_line.component_id else False,
+                'production_id': execution_line.production_id.id if execution_line.production_id else False,
                 'workorder_id': workorder.id,
                 'name': op_name,
                 'workcenter_id': workorder.workcenter_id.id if workorder.workcenter_id else False,
+                'operation_id': workorder.operation_id.id if workorder.operation_id else False,
                 'duration_expected': workorder.duration_expected or 0.0,
                 'sequence': sequence,
-                'additional_code': execution_line.additional_code,
-                'specification_ids': [(6, 0, specification_ids)],
-            })
+                'additional_code': execution_line.additional_code or '',
+                'specification_ids': [(6, 0, specification_ids)] if specification_ids else False,
+                'state': workorder.state or 'pending',
+                'qty_production': workorder.qty_production or 0.0,
+                'qty_produced': workorder.qty_produced or 0.0,
+            }
+
+            operation_vals.append(vals)
             sequence += 10
 
         # Create operation lines
@@ -233,7 +246,6 @@ class WorkOrderExecution(models.Model):
             return len(operation_vals)
 
         return 0
-
     def action_start_selected(self):
         """Start selected work orders"""
         selected_lines = self.work_order_line_ids.filtered(lambda l: l.selected)
@@ -490,17 +502,24 @@ class WorkOrderOperationLine(models.Model):
     _order = 'sequence, id'
 
     # ==========================================
-    # BASIC FIELDS (Define first)
+    # BASIC FIELDS - No dependencies
     # ==========================================
     sequence = fields.Integer(string='Sequence', default=10)
     name = fields.Char(string='Operation', required=True)
-    selected = fields.Boolean(
-        string='Select',
-        help='Select this operation for batch update'
-    )
+    selected = fields.Boolean(string='Select', default=False)
+
+    # Numeric fields
+    duration_expected = fields.Float(string='Expected Duration (minutes)', default=0.0)
+    actual_duration = fields.Float(string='Actual Duration (minutes)', default=0.0)
+    workers_assigned = fields.Integer(string='Workers Assigned', default=0)
+    machines_assigned = fields.Integer(string='Machines Assigned', default=0)
+
+    # Text fields
+    additional_code = fields.Text(string='Additional Code')
+    specification_text = fields.Text(string='Specifications Text')
 
     # ==========================================
-    # DIRECT MANY2ONE RELATIONSHIPS (Define second)
+    # FOREIGN KEY FIELDS - Direct relationships
     # ==========================================
     execution_line_id = fields.Many2one(
         'work.order.execution.line',
@@ -513,149 +532,91 @@ class WorkOrderOperationLine(models.Model):
     workorder_id = fields.Many2one(
         'mrp.workorder',
         string='Work Order',
-        index=True
+        index=True,
+        ondelete='set null'
     )
 
     workcenter_id = fields.Many2one(
         'mrp.workcenter',
-        string='Work Center'
-    )
-
-    # ==========================================
-    # RELATED FIELDS (Define third - after dependencies exist)
-    # ==========================================
-    execution_id = fields.Many2one(
-        'work.order.execution',
-        string='Execution',
-        related='execution_line_id.execution_id',
-        store=True,
-        readonly=True,
-        index=True
-    )
-
-    project_id = fields.Many2one(
-        'project.definition',
-        string='Project',
-        related='execution_line_id.execution_id.project_id',
-        store=True,
-        readonly=True,
-        index=True
-    )
-
-    product_id = fields.Many2one(
-        'product.product',
-        string='Product',
-        related='execution_line_id.execution_id.product_id',
-        store=True,
-        readonly=True,
-        index=True
-    )
-
-    component_id = fields.Many2one(
-        'product.product',
-        string='Component',
-        related='execution_line_id.component_id',
-        store=True,
-        readonly=True
-    )
-
-    production_id = fields.Many2one(
-        'mrp.production',
-        string='Production Order',
-        related='execution_line_id.production_id',
-        store=True,
-        readonly=True,
-        index=True
+        string='Work Center',
+        ondelete='set null'
     )
 
     operation_id = fields.Many2one(
         'mrp.routing.workcenter',
         string='Operation',
-        related='workorder_id.operation_id',
-        store=True,
-        readonly=True
-    )
-
-    state = fields.Selection(
-        related='workorder_id.state',
-        string='State',
-        store=True,
-        readonly=True
+        ondelete='set null'
     )
 
     # ==========================================
-    # NUMERIC AND DATETIME FIELDS
+    # PARENT FIELDS - Stored, not related
     # ==========================================
-    duration_expected = fields.Float(
-        string='Expected Duration (minutes)'
-    )
-    duration_real = fields.Float(
-        related='workorder_id.duration',
-        string='Real Duration (minutes)',
-        readonly=True
+    execution_id = fields.Many2one(
+        'work.order.execution',
+        string='Execution',
+        store=True,
+        index=True,
+        ondelete='cascade'
     )
 
-    actual_duration = fields.Float(
-        string='Actual Duration (minutes)',
-        help='Actual time taken for this operation'
-    )
-    workers_assigned = fields.Integer(
-        string='Workers Assigned',
-        help='Number of workers assigned to this operation'
-    )
-    machines_assigned = fields.Integer(
-        string='Machines Assigned',
-        help='Number of machines assigned to this operation'
+    project_id = fields.Many2one(
+        'project.definition',
+        string='Project',
+        store=True,
+        index=True,
+        ondelete='set null'
     )
 
-    qty_production = fields.Float(
-        related='workorder_id.qty_production',
-        string='Quantity to Produce',
+    product_id = fields.Many2one(
+        'product.product',
+        string='Product',
         store=True,
-        readonly=True
-    )
-    qty_produced = fields.Float(
-        related='workorder_id.qty_produced',
-        string='Quantity Produced',
-        store=True,
-        readonly=True
+        index=True,
+        ondelete='set null'
     )
 
-    date_start = fields.Datetime(
-        related='workorder_id.date_start',
-        string='Start Date',
+    component_id = fields.Many2one(
+        'product.product',
+        string='Component',
         store=True,
-        readonly=True
+        ondelete='set null'
     )
-    date_finished = fields.Datetime(
-        related='workorder_id.date_finished',
-        string='Finish Date',
+
+    production_id = fields.Many2one(
+        'mrp.production',
+        string='Production Order',
         store=True,
-        readonly=True
+        index=True,
+        ondelete='set null'
     )
 
     # ==========================================
-    # TEXT AND SPECIFICATION FIELDS
+    # STATE AND QUANTITIES - From workorder
     # ==========================================
-    additional_code = fields.Text(
-        string='Additional Code',
-        help='Component specifications from pricing'
-    )
+    state = fields.Selection([
+        ('pending', 'Pending'),
+        ('waiting', 'Waiting'),
+        ('ready', 'Ready'),
+        ('progress', 'In Progress'),
+        ('done', 'Done'),
+        ('cancel', 'Cancelled')
+    ], string='State', default='pending')
 
+    duration_real = fields.Float(string='Real Duration (minutes)', default=0.0)
+    qty_production = fields.Float(string='Quantity to Produce', default=0.0)
+    qty_produced = fields.Float(string='Quantity Produced', default=0.0)
+    date_start = fields.Datetime(string='Start Date')
+    date_finished = fields.Datetime(string='Finish Date')
+
+    # ==========================================
+    # SPECIFICATION FIELDS
+    # ==========================================
     specification_ids = fields.Many2many(
         'component.specification.value',
         'operation_specification_rel',
         'operation_id',
         'specification_id',
-        string='Specifications',
-        help='Component specifications from pricing'
-    )
-
-    specification_text = fields.Text(
-        string='Specifications Text',
-        compute='_compute_specification_text',
-        store=True,
-        help='Formatted text of all specifications'
+        string='Specifications'
     )
 
     # ==========================================
@@ -664,9 +625,9 @@ class WorkOrderOperationLine(models.Model):
     is_completed = fields.Boolean(
         string='Completed',
         compute='_compute_is_completed',
-        store=True,
-        index=True
+        store=True
     )
+
     progress_percentage = fields.Float(
         string='Progress %',
         compute='_compute_progress',
@@ -676,18 +637,6 @@ class WorkOrderOperationLine(models.Model):
     # ==========================================
     # COMPUTE METHODS
     # ==========================================
-    @api.depends('specification_ids', 'specification_ids.value', 'specification_ids.specification_name')
-    def _compute_specification_text(self):
-        for record in self:
-            if record.specification_ids:
-                specs = []
-                for spec in record.specification_ids.sorted('sequence'):
-                    if spec.value:
-                        specs.append('%s: %s' % (spec.specification_name, spec.value))
-                record.specification_text = ' | '.join(specs) if specs else ''
-            else:
-                record.specification_text = ''
-
     @api.depends('state')
     def _compute_is_completed(self):
         for record in self:
@@ -696,10 +645,74 @@ class WorkOrderOperationLine(models.Model):
     @api.depends('qty_production', 'qty_produced')
     def _compute_progress(self):
         for record in self:
-            if record.qty_production:
+            if record.qty_production and record.qty_production > 0:
                 record.progress_percentage = (record.qty_produced / record.qty_production) * 100
             else:
                 record.progress_percentage = 0.0
+
+    # ==========================================
+    # CRUD METHODS - Sync with workorder
+    # ==========================================
+    @api.model_create_multi
+    def create(self, vals_list):
+        """Override create to populate parent fields and sync with workorder"""
+        for vals in vals_list:
+            # Populate parent fields from execution_line_id
+            if vals.get('execution_line_id'):
+                execution_line = self.env['work.order.execution.line'].browse(vals['execution_line_id'])
+                if execution_line.exists():
+                    vals['execution_id'] = execution_line.execution_id.id if execution_line.execution_id else False
+                    vals['component_id'] = execution_line.component_id.id if execution_line.component_id else False
+                    vals['production_id'] = execution_line.production_id.id if execution_line.production_id else False
+
+                    if execution_line.execution_id:
+                        vals[
+                            'project_id'] = execution_line.execution_id.project_id.id if execution_line.execution_id.project_id else False
+                        vals[
+                            'product_id'] = execution_line.execution_id.product_id.id if execution_line.execution_id.product_id else False
+
+            # Sync fields from workorder if provided
+            if vals.get('workorder_id'):
+                workorder = self.env['mrp.workorder'].browse(vals['workorder_id'])
+                if workorder.exists():
+                    vals.setdefault('state', workorder.state or 'pending')
+                    vals.setdefault('duration_real', workorder.duration or 0.0)
+                    vals.setdefault('qty_production', workorder.qty_production or 0.0)
+                    vals.setdefault('qty_produced', workorder.qty_produced or 0.0)
+                    vals.setdefault('date_start', workorder.date_start)
+                    vals.setdefault('date_finished', workorder.date_finished)
+                    vals.setdefault('operation_id', workorder.operation_id.id if workorder.operation_id else False)
+
+        return super(WorkOrderOperationLine, self).create(vals_list)
+
+    def write(self, vals):
+        """Override write to sync with workorder when needed"""
+        result = super(WorkOrderOperationLine, self).write(vals)
+
+        # If workorder_id changed, sync fields
+        if 'workorder_id' in vals:
+            for record in self:
+                if record.workorder_id:
+                    record._sync_from_workorder()
+
+        return result
+
+    def _sync_from_workorder(self):
+        """Sync fields from linked workorder"""
+        self.ensure_one()
+        if not self.workorder_id:
+            return
+
+        wo = self.workorder_id
+        self.write({
+            'state': wo.state or 'pending',
+            'duration_real': wo.duration or 0.0,
+            'qty_production': wo.qty_production or 0.0,
+            'qty_produced': wo.qty_produced or 0.0,
+            'date_start': wo.date_start,
+            'date_finished': wo.date_finished,
+            'operation_id': wo.operation_id.id if wo.operation_id else False,
+        })
 
     # ==========================================
     # ACTION METHODS
@@ -723,16 +736,20 @@ class WorkOrderOperationLine(models.Model):
         for record in self:
             if record.workorder_id and record.state in ('pending', 'ready', 'waiting'):
                 record.workorder_id.button_start()
+                record._sync_from_workorder()
 
     def action_finish(self):
         """Finish the work order"""
         for record in self:
             if record.workorder_id and record.state in ('progress', 'to_close'):
                 record.workorder_id.button_finish()
+                record._sync_from_workorder()
 
     def action_assign_resources(self):
-        """Open wizard to assign workers and machines to selected operations"""
-        selected_ops = self.env['work.order.operation.line'].browse(self.env.context.get('active_ids', []))
+        """Open wizard to assign workers and machines"""
+        selected_ops = self.env['work.order.operation.line'].browse(
+            self.env.context.get('active_ids', [])
+        )
 
         if not selected_ops:
             raise UserError(_('Please select operations first!'))

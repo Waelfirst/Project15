@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Project Product Planning & Costing Management',
-    'version': '17.0.3.3.1',  # Changed from 17.0.3.3.0
+    'version': '17.0.3.3.2',  # Changed version
     'category': 'Project',
     'summary': 'Manage projects, product costing, and material planning with enhanced work order operations',
     'description': """
@@ -31,7 +31,7 @@
     'data': [
         # Stage 1: Core model security (loaded first)
         'security/ir.model.access.csv',
-        
+
         # Stage 2: Data and Views
         'data/sequence_data.xml',
         'views/project_definition_views.xml',
@@ -47,7 +47,7 @@
         'views/operation_resource_wizard_views.xml',
         'views/operations_excel_wizard_views.xml',
         'views/menu_views.xml',
-        
+
         # Stage 3: Secondary and Wizard security (loaded after views)
         'security/ir.model.access.secondary.csv',
         'security/ir.model.access.wizard.csv',
